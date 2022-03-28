@@ -185,13 +185,13 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
     bool found = false;
     snprintf(buffer, MAXBUF, "%s", command);
 
-    if (access(command, F_OK) == 0) {
+    if (access(command, X_OK) == 0) {
       found = true;
       strncpy(buffer, command, MAXBUF);
     } else {
       for (size_t i = 0; i < dir_count; i++) {
         snprintf(buffer, MAXBUF, "%s/%s", (char*)dirs->data, command);
-        if (access(buffer, F_OK) == 0) {
+        if (access(buffer, X_OK) == 0) {
           found = true;
           break;
         }
@@ -200,7 +200,7 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
     }
 
     if (!found) {
-      error("child: command not found");
+      error("child: command not found or not executable");
       exit(1);
     }
 
