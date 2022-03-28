@@ -122,6 +122,10 @@ int gettoken(char **outptr) {
     type = PIPE;
     break;
 
+  case ';':
+    type = SEMICOLON;
+    break;
+
   default:
     type = NORMAL;
 
@@ -208,11 +212,11 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
     exit(0);
   } else {
     if (foreground && !doing_pipe) {
-      int w_pid;
       int status;
+      pid_t terminated_pid;
       do {
-        w_pid = wait(&status);
-      } while (w_pid != pid);
+        terminated_pid = waitpid(pid, &status, WNOHANG);
+      } while (terminated_pid != pid);
     }
   }
 }
