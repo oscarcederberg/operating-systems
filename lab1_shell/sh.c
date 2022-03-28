@@ -169,6 +169,52 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
    *
    *
    */
+
+  int pid = fork();
+  if (pid < 0) {
+    error("parent: could not fork");
+    exit(1);
+  }
+
+  if (pid == 0) {
+    char* command = argv[0];
+    list_t* dirs = path_dir_list;
+    size_t dir_count = length(dirs);
+    char buffer[MAXBUF];
+    
+    bool found = false;
+    snprintf(buffer, MAXBUF, "%s", command);
+
+    if (access(command, F_OK) == 0) {
+      found = true;
+      strncpy(buffer, command, MAXBUF);
+    } else {
+      for (size_t i = 0; i < dir_count; i++) {
+        snprintf(buffer, MAXBUF, "%s/%s", (char*)dirs->data, command);
+        if (access(buffer, F_OK) == 0) {
+          found = true;
+          break;
+        }
+        dirs = dirs->succ;
+      }
+    }
+
+    if (!found) {
+      error("child: command not found");
+      exit(1);
+    }
+
+    execv(buffer, argv);
+    exit(0);
+  } else {
+    if (foreground && !doing_pipe) {
+      int w_pid;
+      int status;
+      do {
+        w_pid = wait(&status);
+      } while (w_pid != pid);
+    }
+  }
 }
 
 void parse_line(void) {
