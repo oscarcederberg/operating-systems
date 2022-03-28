@@ -35,6 +35,7 @@ static char *token;                /* a token such as /bin/ls */
 static list_t *path_dir_list; /* list of directories in PATH. */
 static int input_fd;          /* for i/o redirection or pipe. */
 static int output_fd;         /* for i/o redirection or pipe */
+static char *previous_dir;
 
 /* fetch_line: read one line from user and put it in input_buf. */
 int fetch_line(char *prompt) {
@@ -173,6 +174,26 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
    *
    *
    */
+  char* command = argv[0];
+  char current_dir[MAXBUF];
+  getcwd(current_dir, MAXBUF);
+
+  if (strcmp(command, "cd") == 0) {
+      if (strcmp(argv[1], "-")) {
+        if (previous_dir == NULL) {
+          error("parent: no previous working directory found");
+          exit(1);
+        }
+
+        chdir(previous_dir);
+        fprintf(stdout, previous_dir);
+        previous_dir = current_dir;
+      } else if (chdir(argv[1]) == 0) {
+        previous_dir = current_dir;
+      } else {
+        error("parent: failed to switch dir");
+      }
+  }
 
   int pid = fork();
   if (pid < 0) {
@@ -181,7 +202,6 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
   }
 
   if (pid == 0) {
-    char* command = argv[0];
     list_t* dirs = path_dir_list;
     size_t dir_count = length(dirs);
     char buffer[MAXBUF];
