@@ -179,26 +179,28 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
   getcwd(current_dir, MAXBUF);
 
   if (strcmp(command, "cd") == 0) {
-      if (strcmp(argv[1], "-")) {
-        if (previous_dir == NULL) {
-          error("parent: no previous working directory found");
-          exit(1);
-        }
-
-        chdir(previous_dir);
-        fprintf(stdout, previous_dir);
-        previous_dir = current_dir;
-      } else if (chdir(argv[1]) == 0) {
-        previous_dir = current_dir;
-      } else {
-        error("parent: failed to switch dir");
+    if (strcmp(argv[1], "-")) {
+      if (previous_dir == NULL) {
+        error("parent: no previous working directory found");
+        exit(EXIT_FAILURE);
       }
+
+      printf("%s\n", previous_dir);
+      chdir(previous_dir);
+      previous_dir = current_dir;
+    } else if (chdir(argv[1]) == 0) {
+      previous_dir = current_dir;
+    } else {
+      error("parent: failed to switch dir");
+      exit(EXIT_FAILURE);
+    }
+    exit(EXIT_SUCCESS);
   }
 
   int pid = fork();
   if (pid < 0) {
     error("parent: could not fork");
-    exit(1);
+    exit(EXIT_FAILURE);
   }
 
   if (pid == 0) {
@@ -225,11 +227,13 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
 
     if (!found) {
       error("child: command not found or not executable");
-      exit(1);
+      exit(EXIT_FAILURE);
     }
 
+    dup2(input_fd, 0);
+    dup2(output_fd, 1);
     execv(buffer, argv);
-    exit(0);
+    exit(EXIT_SUCCESS);
   } else {
     if (foreground && !doing_pipe) {
       int status;
@@ -244,7 +248,7 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
 void parse_line(void) {
   char *argv[MAX_ARG + 1];
   int argc;
-  //	int		pipe_fd[2];	/* 1 for producer and 0 for consumer. */
+  // int	pipe_fd[2];	/* 1 for producer and 0 for consumer. */
   token_type_t type;
   bool foreground;
   bool doing_pipe;
