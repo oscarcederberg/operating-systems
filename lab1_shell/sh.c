@@ -230,9 +230,11 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
       exit(EXIT_FAILURE);
     }
 
-    dup2(input_fd, 0);
-    dup2(output_fd, 1);
+    if (input_fd != STDIN_FILENO) dup2(input_fd, 0);
+    if (output_fd != STDOUT_FILENO) dup2(output_fd, 1);
     execv(buffer, argv);
+    if (doing_pipe) close(input_fd);
+
     exit(EXIT_SUCCESS);
   } else {
     if (foreground && !doing_pipe) {
@@ -248,13 +250,13 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
 void parse_line(void) {
   char *argv[MAX_ARG + 1];
   int argc;
-  // int	pipe_fd[2];	/* 1 for producer and 0 for consumer. */
+  int	pipe_fd[2];	/* 1 for producer and 0 for consumer. */
   token_type_t type;
   bool foreground;
   bool doing_pipe;
 
-  input_fd = 0;
-  output_fd = 0;
+  input_fd = STDIN_FILENO;
+  output_fd = STDOUT_FILENO;
   argc = 0;
 
   for (;;) {
@@ -298,7 +300,8 @@ void parse_line(void) {
 
     case PIPE:
       doing_pipe = true;
-
+      pipe(pipe_fd);
+      output_fd = pipe_fd[1];
       /*FALLTHROUGH*/
 
     case AMPERSAND:
@@ -316,8 +319,13 @@ void parse_line(void) {
 
       run_program(argv, argc, foreground, doing_pipe);
 
-      input_fd = 0;
-      output_fd = 0;
+      if (doing_pipe) {
+        input_fd = pipe_fd[0];
+        close(pipe_fd[1]);
+      } else {
+        input_fd = STDIN_FILENO;
+      }
+      output_fd = STDOUT_FILENO;
       argc = 0;
 
       if (type == NEWLINE)
