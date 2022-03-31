@@ -35,7 +35,7 @@ static char *token;                /* a token such as /bin/ls */
 static list_t *path_dir_list; /* list of directories in PATH. */
 static int input_fd;          /* for i/o redirection or pipe. */
 static int output_fd;         /* for i/o redirection or pipe */
-static char *previous_dir;
+static char previous_dir[MAXBUF];
 
 /* fetch_line: read one line from user and put it in input_buf. */
 int fetch_line(char *prompt) {
@@ -176,26 +176,27 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
    */
   char* command = argv[0];
   char current_dir[MAXBUF];
+  char* arg = argv[1];
   getcwd(current_dir, MAXBUF);
 
   if (strcmp(command, "cd") == 0) {
-    if (strcmp(argv[1], "-")) {
+    if (strcmp(arg, "-") == 0) {
       if (previous_dir == NULL) {
         error("parent: no previous working directory found");
         exit(EXIT_FAILURE);
       }
-
-      printf("%s\n", previous_dir);
       chdir(previous_dir);
-      previous_dir = current_dir;
-    } else if (chdir(argv[1]) == 0) {
-      previous_dir = current_dir;
+      printf("%s\n", previous_dir);
+      strcpy(previous_dir, current_dir);
+    } else if (chdir(arg) == 0) {
+      printf("switched to dir: %s",arg);
+      strcpy(previous_dir,current_dir);
     } else {
-      error("parent: failed to switch dir");
-      exit(EXIT_FAILURE);
+        error("parent: failed to switch dir: %s by using %s", arg, command);
+        exit(EXIT_FAILURE);
     }
-    exit(EXIT_SUCCESS);
-  }
+      //exit(EXIT_SUCCESS);
+  } else {
 
   int pid = fork();
   if (pid < 0) {
@@ -244,6 +245,7 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
         terminated_pid = waitpid(pid, &status, WNOHANG);
       } while (terminated_pid != pid);
     }
+  }
   }
 }
 
