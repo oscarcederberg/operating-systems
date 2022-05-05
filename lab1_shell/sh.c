@@ -234,7 +234,7 @@ void run_program(char **argv, int argc, bool foreground, bool doing_pipe) {
     if (input_fd != STDIN_FILENO) dup2(input_fd, 0);
     if (output_fd != STDOUT_FILENO) dup2(output_fd, 1);
     execv(buffer, argv);
-    if (doing_pipe) close(input_fd);
+    //if (doing_pipe) close(input_fd); Nås aldrig
 
     exit(EXIT_SUCCESS);
   } else {
