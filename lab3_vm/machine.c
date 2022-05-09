@@ -130,7 +130,7 @@ static unsigned second_chance_replace() {
   return page;
 }
 
-/* TO COPLETE */
+/* TO COMPLETE */
 static unsigned take_phys_page() {
   unsigned page; /* Page to be replaced. */
 
@@ -145,7 +145,8 @@ static void pagefault(unsigned virt_page) {
   num_pagefault += 1;
 
   page = take_phys_page();
-  /* TO COMPLETE */
+  
+  page_table_entry_t* new_page = &page_table[virt_page];
 }
 
 static void translate(unsigned virt_addr, unsigned *phys_addr, bool write) {
