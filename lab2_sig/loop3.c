@@ -4,7 +4,7 @@
 #include <signal.h>
 #include <stdlib.h>
 
-static int alarm_called = 0;
+static volatile int alarm_called = 0;
 
 void iterate() {
     printf("iteration starting...\n");
