@@ -65,6 +65,9 @@ typedef struct {
 
 static unsigned long long num_pagefault;      /* Statistics. */
 static unsigned long long num_diskwrites;
+static unsigned accesses;
+static unsigned page_accesses[256];
+static bool trace = true;
 static page_table_entry_t page_table[NPAGES]; /* OS data structure. All pages. */
 static coremap_entry_t coremap[RAM_PAGES];    /* OS data structure. Pages in memory */
 static unsigned memory[RAM_SIZE];             /* Hardware: RAM. */
@@ -147,6 +150,32 @@ static unsigned second_chance_replace() {
   return page;
 }
 
+static unsigned optimal_replace() {
+  unsigned page;
+  unsigned furthest_pos = 0;
+  unsigned furthest_page = 0;
+  coremap_entry_t* entry;
+
+  for (size_t i = 0; i < RAM_PAGES; ++i) {
+    entry = &coremap[i];
+    page = entry->owner->page;
+    for (size_t j = num_pagefault; j < accesses; j++) {
+      if (page_accesses[j] != page) {
+        continue;
+      }
+
+      if (furthest_pos > j) {
+        break;
+      }
+
+      furthest_pos = j;
+      furthest_page = i;
+    }
+  }
+  
+  return furthest_page;
+}
+
 static unsigned take_phys_page() {
   unsigned page; /* Page to be replaced. */
   coremap_entry_t* entry;
@@ -179,9 +208,14 @@ static unsigned take_phys_page() {
 
 static void pagefault(unsigned virt_page) {
   unsigned page;
+
   page_table_entry_t* new_page;
   coremap_entry_t* entry;
 
+  if (trace) {
+    page_accesses[num_pagefault] = virt_page;
+    accesses += 1;
+  } 
   num_pagefault += 1;
 
   page = take_phys_page();
@@ -490,6 +524,16 @@ int main(int argc, char **argv) {
     return -1;
   }
 
+  run(argc, argv);
+
+  printf("%llu page faults\n", num_pagefault);
+  printf("%llu disk writes\n", num_diskwrites);
+
+  printf("\n----optimal----\n\n");
+  replace = optimal_replace;
+  num_pagefault = 0;
+  num_diskwrites = 0;
+  trace = false;
   run(argc, argv);
 
   printf("%llu page faults\n", num_pagefault);
