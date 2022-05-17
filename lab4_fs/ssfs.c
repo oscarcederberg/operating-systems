@@ -32,8 +32,8 @@
 // TODO: [DIR_ENTRY] add last "m"odification time to the entry and handle it
 // properly
 static int do_getattr(const char *path, struct stat *st) {
-  //	printf( "[getattr] Called\n" );
-  //	printf( "\tAttributes of %s requested\n", path );
+  	printf( "[getattr] Called\n" );
+  	printf( "\tAttributes of %s requested\n", path );
 
   // GNU's definitions of the attributes
   // (http://www.gnu.org/software/libc/manual/html_node/Attribute-Meanings.html):
@@ -56,10 +56,6 @@ static int do_getattr(const char *path, struct stat *st) {
                          // mounted the filesystem
   st->st_gid = getgid(); // The group of the file/directory is the same as the
                          // group of the user who mounted the filesystem
-  st->st_atime =
-      time(NULL); // The last "a"ccess of the file/directory is right now
-  st->st_mtime =
-      time(NULL); // The last "m"odification of the file/directory is right now
 
   if (strcmp(path, "/") == 0) {
     st->st_mode = S_IFDIR | 0755;
@@ -80,6 +76,9 @@ static int do_getattr(const char *path, struct stat *st) {
       printf("  -- %d > %.*s\n", di, FS_NAME_LEN, de->name);
       st->st_size = de->size_bytes;
       st->st_mode = de->mode;
+      st->st_atime = de->atime;
+      st->st_ctime = de->ctime;
+      st->st_mtime = de->mtime;
     } else {
       printf("  -- find_dir_entry cannot find %s\n", fn);
       // this could be a new file. let it through?
@@ -148,6 +147,7 @@ static int do_read(const char *path, char *buffer, size_t size, off_t offset,
   }
   dir_entry *de = index2dir_entry(di);
   unsigned bid = de->first_block;
+  save_directory();
 
   char bcache[BLOCK_SIZE];
   // ... //
@@ -163,6 +163,7 @@ static int do_read(const char *path, char *buffer, size_t size, off_t offset,
   // do_write.
 
   memcpy(buffer, bcache, rsize);
+  de->atime = time(0);
 
   // how much did we read?
   return rsize;
@@ -207,6 +208,9 @@ static int do_write(const char *path, const char *buffer, size_t size,
     }
     // update the size of the file
     de->size_bytes = offset + size;
+    de->mtime = time(0);
+    de->atime = time(0);
+    de->ctime = time(0);
 
     // flush back the directory, since the file info changed
     save_directory();
@@ -334,7 +338,9 @@ static int do_truncate(const char *path, off_t offset) {
 // TODO: [RENAME] implement this!
 static int do_rename(const char *opath, const char *npath) {
   printf("--> Trying to rename %s to %s\n", opath, npath);
-  return 0; // reports success, but does nothing
+  int res = rename(opath, npath);
+  //printf("hejsan nu bytar vi namn: %c ",result);
+  return res; // reports success, but does nothing
 }
 
 // TODO: [REMOVE] implement this!
@@ -369,6 +375,9 @@ static int do_create(const char *path, mode_t m, struct fuse_file_info *ffi) {
   de->mode = m; // S_IFREG | 0644;
   de->size_bytes = 0;
   de->first_block = EOF_BLOCK; // end of file block
+  de->atime = time(0);
+  de->mtime = time(0);
+  de->ctime = time(0);
 
   // must save directory changes to disk!
   save_directory();

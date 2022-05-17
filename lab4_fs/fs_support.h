@@ -63,6 +63,9 @@ typedef struct {
   mode_t mode;
   unsigned long size_bytes;
   unsigned short first_block;
+  time_t mtime;
+  time_t ctime;
+  time_t atime;
 } dir_entry;
 
 #define DIR_ENTRIES_PER_BLOCK (BLOCK_SIZE / sizeof(dir_entry))
