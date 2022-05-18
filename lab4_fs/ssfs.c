@@ -141,30 +141,51 @@ static int do_read(const char *path, char *buffer, size_t size, off_t offset,
                      load_directory();
                      int di = find_dir_entry(fn);
                      if (di < 0) {
-                     // no such file
-                     printf("    no such file\n");
-                     return -ENOENT;
+                       // no such file
+                       printf("    no such file\n");
+                       return -ENOENT;
                      }
                      dir_entry *de = index2dir_entry(di);
                      unsigned bid = de->first_block;
-                     de->atime = time(0);
-                     save_directory();
+                     //de->atime = time(0);
+                     //save_directory();
 
                      char bcache[BLOCK_SIZE];
+                     unsigned short *bmap = load_blockmap();
+
+                     unsigned int byte_offset = offset % BLOCK_SIZE;
+                     unsigned int block_offset = offset / BLOCK_SIZE;
+
+                     for (int i = 0; i < block_offset;i++) {
+                         bid = bmap[bid];
+                     }
+
+                     if (bid == EOF_BLOCK) return 0;
                      // ... //
                      // reads the block into the cache
                      readBlock(bid, bcache);
                      // cannot read all maybe?
-                     size_t rsize = min(size, BLOCK_SIZE);
+                     size_t rsize = min(size, BLOCK_SIZE - byte_offset);
+                     memcpy(buffer, bcache + byte_offset, rsize);
                      // ... //
-
+                     size -= rsize;
+                     bid = bmap[bid];
+                     while(size >= BLOCK_SIZE && bid != EOF_BLOCK) {
+                       readBlock(bid, bcache);
+                       memcpy(buffer + rsize, bcache, BLOCK_SIZE);
+                       bid = bmap[bid];
+                       size -= BLOCK_SIZE;
+                       rsize += BLOCK_SIZE;
+                     }
+                     if(size > 0 && bid != EOF_BLOCK) {
+                       readBlock(bid,bcache);
+                       memcpy(buffer + rsize, bcache, size);
+                       rsize += size;
+                     }
                      // we now fill the buffer with this block contents
                      // TODO: [READ_OFFSET] account for the offset! May need to traverse the blocks
                      // of this file until the block holding the right offset. Have a look at
                      // do_write.
-
-                     memcpy(buffer, bcache, rsize);
-
                      // how much did we read?
                      return rsize;
 }
