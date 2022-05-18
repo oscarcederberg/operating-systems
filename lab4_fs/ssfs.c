@@ -422,6 +422,14 @@ static int do_unlink(const char *path) {
     return -ENOENT;
   } else {
     dir_entry *de = index2dir_entry(di);
+    unsigned short cur = de->first_block;
+    unsigned short *bmap = load_blockmap();
+    while(cur != EOF_BLOCK) {
+      unsigned short new = bmap[cur];
+      free_block(cur);
+      cur = bmap[cur];
+      cur = new;
+    }
     strcpy(de->name, "");
     save_directory();
   }
