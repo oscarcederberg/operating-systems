@@ -67,6 +67,7 @@ static unsigned long long num_pagefault;      /* Statistics. */
 static unsigned long long num_diskwrites;
 static unsigned accesses;
 static unsigned page_accesses[256];
+static int page_memory[RAM_PAGES];
 static bool trace = true;
 static page_table_entry_t page_table[NPAGES]; /* OS data structure. All pages. */
 static coremap_entry_t coremap[RAM_PAGES];    /* OS data structure. Pages in memory */
@@ -154,22 +155,28 @@ static unsigned optimal_replace() {
   unsigned page;
   unsigned furthest_pos = 0;
   unsigned furthest_page = 0;
-  coremap_entry_t* entry;
 
   for (size_t i = 0; i < RAM_PAGES; ++i) {
-    entry = &coremap[i];
-    page = entry->owner->page;
-    for (size_t j = num_pagefault; j < accesses; j++) {
-      if (page_accesses[j] != page) {
-        continue;
+    if (page_memory[i] == -1) return i;
+  }
+
+  for (size_t i = 0; i < RAM_PAGES; ++i) {
+    page = page_memory[i];
+
+    for (size_t j = num_pagefault - 1; j < accesses; j++) {
+      if (j == accesses && page_accesses[j] != page) {
+        return i;
       }
 
-      if (furthest_pos > j) {
+      if (page_accesses[j] == page) {
+        if (j < furthest_pos) {
+          break;
+        }
+
+        furthest_pos = j;
+        furthest_page = i;
         break;
       }
-
-      furthest_pos = j;
-      furthest_page = i;
     }
   }
   
@@ -212,10 +219,6 @@ static void pagefault(unsigned virt_page) {
   page_table_entry_t* new_page;
   coremap_entry_t* entry;
 
-  if (trace) {
-    page_accesses[num_pagefault] = virt_page;
-    accesses += 1;
-  } 
   num_pagefault += 1;
 
   page = take_phys_page();
@@ -230,6 +233,13 @@ static void pagefault(unsigned virt_page) {
   new_page->inmemory = 1;
   new_page->page = page;
   entry->owner = new_page;
+
+  printf("MEMORY: [%u] = %u\n", page, virt_page);
+  page_memory[page] = virt_page;
+
+  for (size_t i = 0; i < RAM_PAGES; ++i) {
+    printf("%lu: %d\n", i, page_memory[i]);
+  }
 }
 
 static void translate(unsigned virt_addr, unsigned *phys_addr, bool write) {
@@ -238,6 +248,11 @@ static void translate(unsigned virt_addr, unsigned *phys_addr, bool write) {
 
   virt_page = virt_addr / PAGESIZE;
   offset = virt_addr & (PAGESIZE - 1);
+
+  if (trace) {
+    page_accesses[accesses] = virt_page;
+    accesses += 1;
+  } 
 
   if (!page_table[virt_page].inmemory)
     pagefault(virt_page);
@@ -363,56 +378,56 @@ int run(int argc, char **argv) {
     increment_pc = true;
     writeback = true;
 
-    printf("pc = %3d: ", cpu.pc);
+    // printf("pc = %3d: ", cpu.pc);
 
     switch (opcode) {
     case ADD:
-      puts("ADD");
+      // puts("ADD");
       dest = source1 + source2;
       break;
 
     case ADDI:
-      puts("ADDI");
+      // puts("ADDI");
       dest = source1 + constant;
       break;
 
     case SUB:
-      puts("SUB");
+      // puts("SUB");
       dest = source1 - source2;
       break;
 
     case SUBI:
-      puts("SUBI");
+      // puts("SUBI");
       dest = source1 - constant;
       break;
 
     case MUL:
-      puts("MUL");
+      // puts("MUL");
       dest = source1 * source2;
       break;
 
     case SGE:
-      puts("SGE");
+      // puts("SGE");
       dest = source1 >= source2;
       break;
 
     case SGT:
-      puts("SGT");
+      // puts("SGT");
       dest = source1 > source2;
       break;
 
     case SEQ:
-      puts("SEQ");
+      // puts("SEQ");
       dest = source1 == source2;
       break;
 
     case SEQI:
-      puts("SEQI");
+      // puts("SEQI");
       dest = source1 == constant;
       break;
 
     case BT:
-      puts("BT");
+      // puts("BT");
       writeback = false;
       if (source1 != 0) {
         cpu.pc = constant;
@@ -421,7 +436,7 @@ int run(int argc, char **argv) {
       break;
 
     case BF:
-      puts("BF");
+      // puts("BF");
       writeback = false;
       if (source1 == 0) {
         cpu.pc = constant;
@@ -430,27 +445,27 @@ int run(int argc, char **argv) {
       break;
 
     case BA:
-      puts("BA");
+      // puts("BA");
       writeback = false;
       increment_pc = false;
       cpu.pc = constant;
       break;
 
     case LD:
-      puts("LD");
+      // puts("LD");
       data = read_memory(memory, source1 + constant);
       dest = data;
       break;
 
     case ST:
-      puts("ST");
+      // puts("ST");
       data = cpu.reg[dest_reg];
       write_memory(memory, source1 + constant, data);
       writeback = false;
       break;
 
     case CALL:
-      puts("CALL");
+      // puts("CALL");
       increment_pc = false;
       dest = cpu.pc + 1;
       dest_reg = 31;
@@ -458,14 +473,14 @@ int run(int argc, char **argv) {
       break;
 
     case JMP:
-      puts("JMP");
+      // puts("JMP");
       increment_pc = false;
       writeback = false;
       cpu.pc = source1;
       break;
 
     case HALT:
-      puts("HALT");
+      // puts("HALT");
       increment_pc = false;
       writeback = false;
       proceed = false;
@@ -511,10 +526,16 @@ int main(int argc, char **argv) {
   if (argc >= 2) {
     if (!strcmp(argv[1], "--second-chance")) {
       replace = second_chance_replace;
+      trace = true;
       printf("Second change page replacement algorithm.\n");
     } else if (!strcmp(argv[1], "--fifo")) {
       replace = fifo_page_replace;
+      trace = true;
       printf("FIFO page replacement algorithm.\n");
+    } else if (!strcmp(argv[1], "--optimal")) {
+      replace = optimal_replace;
+      trace = false;
+      printf("Optimal page replacement algorithm.\n");
     } else {
       printf("Unknown page replacement algorithm.\n");
       return -1;
@@ -524,18 +545,39 @@ int main(int argc, char **argv) {
     return -1;
   }
 
+  if (!trace) {
+    FILE *fp = fopen("trace", "r");   
+    if(fp) {
+      fscanf(fp, "%u", &accesses);
+      for (size_t i = 0; i < accesses; i++) {
+        fscanf(fp, "%u", &page_accesses[i]);
+      }
+
+      fclose(fp);
+    } else {
+      printf("trace-file missing\n");
+      return 1;
+    }
+  }
+
+  for (size_t i = 0; i < RAM_PAGES; i++) {
+    page_memory[i] = -1;
+  }
+
   run(argc, argv);
 
   printf("%llu page faults\n", num_pagefault);
   printf("%llu disk writes\n", num_diskwrites);
 
-  printf("\n----optimal----\n\n");
-  replace = optimal_replace;
-  num_pagefault = 0;
-  num_diskwrites = 0;
-  trace = false;
-  run(argc, argv);
-
-  printf("%llu page faults\n", num_pagefault);
-  printf("%llu disk writes\n", num_diskwrites);
+  if (trace) {
+    FILE *fp = fopen("trace", "w");   
+    if(fp) {
+      fprintf(fp, "%u\n", accesses);
+      for (size_t i = 0; i < accesses; i++) {
+        fprintf(fp, "%u", page_accesses[i]);
+        if (i < accesses - 1) fprintf(fp, "\n");
+      }
+      fclose(fp);
+    }
+  }
 }
