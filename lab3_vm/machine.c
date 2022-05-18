@@ -64,7 +64,7 @@ typedef struct {
 } coremap_entry_t;
 
 static unsigned long long num_pagefault;      /* Statistics. */
-static unsigned long long num_diskwrites;
+static unsigned long long num_diskwrite;
 static unsigned accesses;
 static unsigned page_accesses[256];
 static int page_memory[RAM_PAGES];
@@ -109,7 +109,7 @@ static void read_page(unsigned phys_page, unsigned swap_page) {
 static void write_page(unsigned phys_page, unsigned swap_page) {
   memcpy(&swap[swap_page * PAGESIZE], &memory[phys_page * PAGESIZE],
          PAGESIZE * sizeof(unsigned));
-  num_diskwrites++;
+  num_diskwrite++;
 }
 
 static unsigned new_swap_page() {
@@ -567,7 +567,7 @@ int main(int argc, char **argv) {
   run(argc, argv);
 
   printf("%llu page faults\n", num_pagefault);
-  printf("%llu disk writes\n", num_diskwrites);
+  printf("%llu disk writes\n", num_diskwrite);
 
   if (trace) {
     FILE *fp = fopen("trace", "w");   
