@@ -133,40 +133,40 @@ static int do_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
 // but make sure you return the right number of bytes you read.
 static int do_read(const char *path, char *buffer, size_t size, off_t offset,
                    struct fuse_file_info *fi) {
-  printf("--> Trying to read %s, %ld, %zu\n", path, offset, size);
+                     printf("--> Trying to read %s, %ld, %zu\n", path, offset, size);
 
-  // skip the "/" in the begining
-  const char *fn = &path[1];
-  // let's figure out the dir entry for the path
-  load_directory();
-  int di = find_dir_entry(fn);
-  if (di < 0) {
-    // no such file
-    printf("    no such file\n");
-    return -ENOENT;
-  }
-  dir_entry *de = index2dir_entry(di);
-  unsigned bid = de->first_block;
-  de->atime = time(0);
-  save_directory();
+                     // skip the "/" in the begining
+                     const char *fn = &path[1];
+                     // let's figure out the dir entry for the path
+                     load_directory();
+                     int di = find_dir_entry(fn);
+                     if (di < 0) {
+                     // no such file
+                     printf("    no such file\n");
+                     return -ENOENT;
+                     }
+                     dir_entry *de = index2dir_entry(di);
+                     unsigned bid = de->first_block;
+                     de->atime = time(0);
+                     save_directory();
 
-  char bcache[BLOCK_SIZE];
-  // ... //
-  // reads the block into the cache
-  readBlock(bid, bcache);
-  // cannot read all maybe?
-  size_t rsize = min(size, BLOCK_SIZE);
-  // ... //
+                     char bcache[BLOCK_SIZE];
+                     // ... //
+                     // reads the block into the cache
+                     readBlock(bid, bcache);
+                     // cannot read all maybe?
+                     size_t rsize = min(size, BLOCK_SIZE);
+                     // ... //
 
-  // we now fill the buffer with this block contents
-  // TODO: [READ_OFFSET] account for the offset! May need to traverse the blocks
-  // of this file until the block holding the right offset. Have a look at
-  // do_write.
+                     // we now fill the buffer with this block contents
+                     // TODO: [READ_OFFSET] account for the offset! May need to traverse the blocks
+                     // of this file until the block holding the right offset. Have a look at
+                     // do_write.
 
-  memcpy(buffer, bcache, rsize);
+                     memcpy(buffer, bcache, rsize);
 
-  // how much did we read?
-  return rsize;
+                     // how much did we read?
+                     return rsize;
 }
 
 // Writes buffer to file, at given offset. Should extend the file if necessary
@@ -310,6 +310,7 @@ static int do_truncate(const char *path, off_t offset) {
   int di = find_dir_entry(fn);
   if (di < 0) {
     // no such file - do nothing?!
+    printf("  > No such file exists.");
     return -ENOENT;
   } else {
     // file found! must alter both the Directory
@@ -317,14 +318,45 @@ static int do_truncate(const char *path, off_t offset) {
     printf("  > file exits. truncate it.");
 
     dir_entry *de = index2dir_entry(di);
-    de->size_bytes = 0;
+    de->size_bytes = offset;
 
+    unsigned short *bmap = load_blockmap();
+    unsigned int block_offset = offset / BLOCK_SIZE;
+    unsigned short cur = de->first_block;
+
+    //free_block(de->first_block);
+    if (cur == EOF_BLOCK && block_offset > 0) {
+        cur = alloc_block();
+        de->first_block = cur;
+    }
     // TODO: [TRUNC_FREE] also free the blocks of this file!
     // load block map
-    // while(de->first_block != EOF_BLOCK) {
-    // freeBlock()
-    //	de->first_block = bmap.blockmap[de->first_block];
-    // }
+    for (int i = 0; i < block_offset;i++) {
+      if (cur == EOF_BLOCK && (block_offset - i) != 1) {
+        bmap[cur] = alloc_block();
+      }
+      if (cur != EOF_BLOCK) {
+        cur = bmap[cur];
+      }
+    }
+
+    unsigned short last = cur;
+    if (cur != EOF_BLOCK)
+      cur = bmap[cur];
+
+    if (cur != EOF_BLOCK && bmap[cur] != EOF_BLOCK) {
+      /* code */
+      while(cur != EOF_BLOCK) {
+        unsigned short new = bmap[cur];
+        free_block(cur);
+        cur = bmap[cur];
+        cur = new;
+      }
+      if(last != EOF_BLOCK) {
+        bmap[last] = EOF_BLOCK;
+      }
+    }
+    save_blockmap();
     // save block map
 
     // for now just cut loose all blocks! block leak!
@@ -354,7 +386,7 @@ static int do_rename(const char *opath, const char *npath) {
     } else {
       strcpy(de->name, npath);
     }
-    save_directory(); 
+    save_directory();
   }
   return 0; // reports success, but does nothing
 }
@@ -371,7 +403,7 @@ static int do_unlink(const char *path) {
     dir_entry *de = index2dir_entry(di);
     strcpy(de->name, "");
     save_directory();
-  } 
+  }
   return 0; // reports success, but does nothing
 }
 
