@@ -65,7 +65,8 @@ typedef struct {
 
 static unsigned long long num_pagefault;      /* Statistics. */
 static unsigned long long num_diskwrite;
-static unsigned accesses;
+static unsigned long long num_access;
+static unsigned long long current_access;
 static unsigned page_accesses[256];
 static int page_memory[RAM_PAGES];
 static bool trace = true;
@@ -151,36 +152,44 @@ static unsigned second_chance_replace() {
   return page;
 }
 
-static unsigned optimal_replace() {
+static unsigned find_furthest_page() {
   unsigned page;
   unsigned furthest_pos = 0;
   unsigned furthest_page = 0;
 
-  for (size_t i = 0; i < RAM_PAGES; ++i) {
-    if (page_memory[i] == -1) return i;
-  }
+  for (size_t index = 0; index < RAM_PAGES; index++) {
+    page = page_memory[index];
 
-  for (size_t i = 0; i < RAM_PAGES; ++i) {
-    page = page_memory[i];
-
-    for (size_t j = num_pagefault - 1; j < accesses; j++) {
-      if (j == accesses && page_accesses[j] != page) {
-        return i;
+    for (size_t access = current_access - 1; access < num_access; access++) {
+      if (access == num_access - 1 && page_accesses[access] != page) {
+        // printf("debug: index %lu had pos %lu... end of array!\n", index, access);
+        return index;
       }
-
-      if (page_accesses[j] == page) {
-        if (j < furthest_pos) {
+      
+      if (page_accesses[access] == page) {
+        // printf("debug: index %lu had pos %lu... ", index, access);
+        if(access < furthest_pos) {
+          // printf("not longest\n");
           break;
         }
 
-        furthest_pos = j;
-        furthest_page = i;
+        // printf("longer!\n");
+        furthest_page = page;
+        furthest_pos = access;
         break;
       }
     }
   }
-  
+
   return furthest_page;
+}
+
+static unsigned optimal_replace() {
+  for (size_t i = 0; i < RAM_PAGES; ++i) {
+    if (page_memory[i] == -1) return i;
+  }
+
+  return find_furthest_page();
 }
 
 static unsigned take_phys_page() {
@@ -234,12 +243,14 @@ static void pagefault(unsigned virt_page) {
   new_page->page = page;
   entry->owner = new_page;
 
-  printf("MEMORY: [%u] = %u\n", page, virt_page);
-  page_memory[page] = virt_page;
+  // printf("MEMORY:\n");
+  // for (size_t i = 0; i < RAM_PAGES; ++i) {
+  //   printf("%lu: %d", i, page_memory[i]);
+  //   if (i == page) printf("\t<- %u", virt_page);
+  //   printf("\n");
+  // }
 
-  for (size_t i = 0; i < RAM_PAGES; ++i) {
-    printf("%lu: %d\n", i, page_memory[i]);
-  }
+  page_memory[page] = virt_page;
 }
 
 static void translate(unsigned virt_addr, unsigned *phys_addr, bool write) {
@@ -249,10 +260,13 @@ static void translate(unsigned virt_addr, unsigned *phys_addr, bool write) {
   virt_page = virt_addr / PAGESIZE;
   offset = virt_addr & (PAGESIZE - 1);
 
+  current_access += 1;
   if (trace) {
-    page_accesses[accesses] = virt_page;
-    accesses += 1;
-  } 
+    page_accesses[num_access] = virt_page;
+    num_access += 1;
+  }
+
+  // printf("access [%llu]: %u\n", current_access, virt_page);
 
   if (!page_table[virt_page].inmemory)
     pagefault(virt_page);
@@ -548,8 +562,8 @@ int main(int argc, char **argv) {
   if (!trace) {
     FILE *fp = fopen("trace", "r");   
     if(fp) {
-      fscanf(fp, "%u", &accesses);
-      for (size_t i = 0; i < accesses; i++) {
+      fscanf(fp, "%llu", &num_access);
+      for (size_t i = 0; i < num_access; i++) {
         fscanf(fp, "%u", &page_accesses[i]);
       }
 
@@ -572,10 +586,10 @@ int main(int argc, char **argv) {
   if (trace) {
     FILE *fp = fopen("trace", "w");   
     if(fp) {
-      fprintf(fp, "%u\n", accesses);
-      for (size_t i = 0; i < accesses; i++) {
+      fprintf(fp, "%llu\n", num_access);
+      for (size_t i = 0; i < num_access; i++) {
         fprintf(fp, "%u", page_accesses[i]);
-        if (i < accesses - 1) fprintf(fp, "\n");
+        if (i < num_access - 1) fprintf(fp, "\n");
       }
       fclose(fp);
     }
