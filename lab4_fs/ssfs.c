@@ -147,6 +147,7 @@ static int do_read(const char *path, char *buffer, size_t size, off_t offset,
   }
   dir_entry *de = index2dir_entry(di);
   unsigned bid = de->first_block;
+  de->atime = time(0);
   save_directory();
 
   char bcache[BLOCK_SIZE];
@@ -163,7 +164,6 @@ static int do_read(const char *path, char *buffer, size_t size, off_t offset,
   // do_write.
 
   memcpy(buffer, bcache, rsize);
-  de->atime = time(0);
 
   // how much did we read?
   return rsize;
@@ -338,14 +338,40 @@ static int do_truncate(const char *path, off_t offset) {
 // TODO: [RENAME] implement this!
 static int do_rename(const char *opath, const char *npath) {
   printf("--> Trying to rename %s to %s\n", opath, npath);
-  int res = rename(opath, npath);
-  //printf("hejsan nu bytar vi namn: %c ",result);
-  return res; // reports success, but does nothing
+  const char *fn = &opath[1];
+  int di = find_dir_entry(fn);
+  if (di < 0) {
+    printf("No such file: %s\n", opath);
+    return -ENOENT;
+  } else {
+    dir_entry *de = index2dir_entry(di);
+    printf("changing name from %s to %s\n", de->name, npath);
+    if (npath[0] == '/') {
+      char * newpath = strdup(npath);
+      memmove(newpath,newpath+1,strlen(newpath));
+      printf("new path: %s\n", newpath);
+      strcpy(de->name, newpath);
+    } else {
+      strcpy(de->name, npath);
+    }
+    save_directory(); 
+  }
+  return 0; // reports success, but does nothing
 }
 
 // TODO: [REMOVE] implement this!
 static int do_unlink(const char *path) {
   printf("--> Trying to remove %s\n", path);
+  const char *fn = &path[1];
+  int di = find_dir_entry(fn);
+  if (di < 0) {
+    printf("No such file: %s\n", path);
+    return -ENOENT;
+  } else {
+    dir_entry *de = index2dir_entry(di);
+    strcpy(de->name, "");
+    save_directory();
+  } 
   return 0; // reports success, but does nothing
 }
 
