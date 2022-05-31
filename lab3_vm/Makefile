@@ -10,7 +10,10 @@ run-fifo : machine
 run-sc : machine
 	./machine --second-chance fac.s
 
-run-all : run-fifo run-sc
+run-opt : machine
+	./machine --optimal fac.s
+
+run-all : run-fifo run-sc run-opt
 
 clean :
 	rm -f machine

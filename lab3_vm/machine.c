@@ -47,6 +47,7 @@ typedef struct {
   unsigned reg[NREG]; /* Registers. */
 } cpu_t;
 
+/* Table entry for a single page */
 typedef struct {
   unsigned int page : 27;      /* Swap or RAM page. */
   unsigned int inmemory : 1;   /* Page is in memory. */
@@ -56,14 +57,21 @@ typedef struct {
   unsigned int readonly : 1;   /* Error if written to (not checked). */
 } page_table_entry_t;
 
+/* Table entry of a single page in memory */
 typedef struct {
   page_table_entry_t *owner; /* Owner of this phys page. */
   unsigned page;             /* Swap page of page if assigned. */
 } coremap_entry_t;
 
 static unsigned long long num_pagefault;      /* Statistics. */
-static page_table_entry_t page_table[NPAGES]; /* OS data structure. */
-static coremap_entry_t coremap[RAM_PAGES];    /* OS data structure. */
+static unsigned long long num_diskwrite;
+static unsigned long long num_access;
+static unsigned long long current_access;
+static unsigned page_accesses[256];
+static int page_memory[RAM_PAGES];
+static bool trace = true;
+static page_table_entry_t page_table[NPAGES]; /* OS data structure. All pages. */
+static coremap_entry_t coremap[RAM_PAGES];    /* OS data structure. Pages in memory */
 static unsigned memory[RAM_SIZE];             /* Hardware: RAM. */
 static unsigned swap[SWAP_SIZE];              /* Hardware: disk. */
 static unsigned (*replace)(void);             /* Page repl. alg. */
@@ -92,14 +100,17 @@ void error(char *fmt, ...) {
   exit(1);
 }
 
+/* Write to phys_page from swap_page */
 static void read_page(unsigned phys_page, unsigned swap_page) {
   memcpy(&memory[phys_page * PAGESIZE], &swap[swap_page * PAGESIZE],
          PAGESIZE * sizeof(unsigned));
 }
 
+/* Write to swap_page from phys_page */
 static void write_page(unsigned phys_page, unsigned swap_page) {
   memcpy(&swap[swap_page * PAGESIZE], &memory[phys_page * PAGESIZE],
          PAGESIZE * sizeof(unsigned));
+  num_diskwrite++;
 }
 
 static unsigned new_swap_page() {
@@ -111,30 +122,102 @@ static unsigned new_swap_page() {
 }
 
 static unsigned fifo_page_replace() {
-  int page;
+  static int page = -1;
 
-  page = INT_MAX;
+  page += 1;
+  page %= RAM_PAGES;
 
   assert(page < RAM_PAGES);
-  /* TO COMPLETE */
+  
   return page;
 }
 
 static unsigned second_chance_replace() {
-  int page;
+  static int page = -1;
+  coremap_entry_t* entry;
 
-  page = INT_MAX;
+  while (true) {
+    page += 1;
+    page %= RAM_PAGES;
+    
+    assert(page < RAM_PAGES);
+    
+    entry = &coremap[page];
+    if (entry->owner == NULL || !entry->owner->referenced) {
+      break;
+    }
+    entry->owner->referenced = 0;   
+  }
 
-  assert(page < RAM_PAGES);
-  /* TO COMPLETE */
   return page;
 }
 
-/* TO COPLETE */
+static unsigned find_furthest_page() {
+  unsigned page;
+  unsigned furthest_pos = 0;
+  unsigned furthest_page = 0;
+
+  for (size_t index = 0; index < RAM_PAGES; index++) {
+    page = page_memory[index];
+
+    for (size_t access = current_access - 1; access < num_access; access++) {
+      if (access == num_access - 1 && page_accesses[access] != page) {
+        // printf("debug: index %lu had pos %lu... end of array!\n", index, access);
+        return index;
+      }
+      
+      if (page_accesses[access] == page) {
+        // printf("debug: index %lu had pos %lu... ", index, access);
+        if(access < furthest_pos) {
+          // printf("not longest\n");
+          break;
+        }
+
+        // printf("longer!\n");
+        furthest_page = page;
+        furthest_pos = access;
+        break;
+      }
+    }
+  }
+
+  return furthest_page;
+}
+
+static unsigned optimal_replace() {
+  for (size_t i = 0; i < RAM_PAGES; ++i) {
+    if (page_memory[i] == -1) return i;
+  }
+
+  return find_furthest_page();
+}
+
 static unsigned take_phys_page() {
   unsigned page; /* Page to be replaced. */
+  coremap_entry_t* entry;
 
   page = (*replace)();
+  entry = &coremap[page];
+
+  if (entry->owner == NULL) {
+    return page;
+  }
+
+  if (entry->owner->ondisk) {
+    if (entry->owner->modified) {
+      write_page(page, entry->page);
+    }
+    entry->owner->page = entry->page;
+  } else {
+    unsigned swap = new_swap_page();
+    entry->owner->page = swap;
+    write_page(page, swap);
+  }
+
+  entry->owner->inmemory = 0;
+  entry->owner->ondisk = 1;
+  entry->owner->modified = 0;
+  entry->owner->referenced = 0;
 
   return page;
 }
@@ -142,10 +225,32 @@ static unsigned take_phys_page() {
 static void pagefault(unsigned virt_page) {
   unsigned page;
 
+  page_table_entry_t* new_page;
+  coremap_entry_t* entry;
+
   num_pagefault += 1;
 
   page = take_phys_page();
-  /* TO COMPLETE */
+  new_page = &page_table[virt_page];
+  entry = &coremap[page];
+  
+  if(new_page->ondisk) {
+    entry->page = new_page->page;
+    read_page(page, new_page->page);
+  }
+
+  new_page->inmemory = 1;
+  new_page->page = page;
+  entry->owner = new_page;
+
+  // printf("MEMORY:\n");
+  // for (size_t i = 0; i < RAM_PAGES; ++i) {
+  //   printf("%lu: %d", i, page_memory[i]);
+  //   if (i == page) printf("\t<- %u", virt_page);
+  //   printf("\n");
+  // }
+
+  page_memory[page] = virt_page;
 }
 
 static void translate(unsigned virt_addr, unsigned *phys_addr, bool write) {
@@ -154,6 +259,14 @@ static void translate(unsigned virt_addr, unsigned *phys_addr, bool write) {
 
   virt_page = virt_addr / PAGESIZE;
   offset = virt_addr & (PAGESIZE - 1);
+
+  current_access += 1;
+  if (trace) {
+    page_accesses[num_access] = virt_page;
+    num_access += 1;
+  }
+
+  // printf("access [%llu]: %u\n", current_access, virt_page);
 
   if (!page_table[virt_page].inmemory)
     pagefault(virt_page);
@@ -279,56 +392,56 @@ int run(int argc, char **argv) {
     increment_pc = true;
     writeback = true;
 
-    printf("pc = %3d: ", cpu.pc);
+    // printf("pc = %3d: ", cpu.pc);
 
     switch (opcode) {
     case ADD:
-      puts("ADD");
+      // puts("ADD");
       dest = source1 + source2;
       break;
 
     case ADDI:
-      puts("ADDI");
+      // puts("ADDI");
       dest = source1 + constant;
       break;
 
     case SUB:
-      puts("SUB");
+      // puts("SUB");
       dest = source1 - source2;
       break;
 
     case SUBI:
-      puts("SUBI");
+      // puts("SUBI");
       dest = source1 - constant;
       break;
 
     case MUL:
-      puts("MUL");
+      // puts("MUL");
       dest = source1 * source2;
       break;
 
     case SGE:
-      puts("SGE");
+      // puts("SGE");
       dest = source1 >= source2;
       break;
 
     case SGT:
-      puts("SGT");
+      // puts("SGT");
       dest = source1 > source2;
       break;
 
     case SEQ:
-      puts("SEQ");
+      // puts("SEQ");
       dest = source1 == source2;
       break;
 
     case SEQI:
-      puts("SEQI");
+      // puts("SEQI");
       dest = source1 == constant;
       break;
 
     case BT:
-      puts("BT");
+      // puts("BT");
       writeback = false;
       if (source1 != 0) {
         cpu.pc = constant;
@@ -337,7 +450,7 @@ int run(int argc, char **argv) {
       break;
 
     case BF:
-      puts("BF");
+      // puts("BF");
       writeback = false;
       if (source1 == 0) {
         cpu.pc = constant;
@@ -346,27 +459,27 @@ int run(int argc, char **argv) {
       break;
 
     case BA:
-      puts("BA");
+      // puts("BA");
       writeback = false;
       increment_pc = false;
       cpu.pc = constant;
       break;
 
     case LD:
-      puts("LD");
+      // puts("LD");
       data = read_memory(memory, source1 + constant);
       dest = data;
       break;
 
     case ST:
-      puts("ST");
+      // puts("ST");
       data = cpu.reg[dest_reg];
       write_memory(memory, source1 + constant, data);
       writeback = false;
       break;
 
     case CALL:
-      puts("CALL");
+      // puts("CALL");
       increment_pc = false;
       dest = cpu.pc + 1;
       dest_reg = 31;
@@ -374,14 +487,14 @@ int run(int argc, char **argv) {
       break;
 
     case JMP:
-      puts("JMP");
+      // puts("JMP");
       increment_pc = false;
       writeback = false;
       cpu.pc = source1;
       break;
 
     case HALT:
-      puts("HALT");
+      // puts("HALT");
       increment_pc = false;
       writeback = false;
       proceed = false;
@@ -427,10 +540,16 @@ int main(int argc, char **argv) {
   if (argc >= 2) {
     if (!strcmp(argv[1], "--second-chance")) {
       replace = second_chance_replace;
+      trace = true;
       printf("Second change page replacement algorithm.\n");
     } else if (!strcmp(argv[1], "--fifo")) {
       replace = fifo_page_replace;
+      trace = true;
       printf("FIFO page replacement algorithm.\n");
+    } else if (!strcmp(argv[1], "--optimal")) {
+      replace = optimal_replace;
+      trace = false;
+      printf("Optimal page replacement algorithm.\n");
     } else {
       printf("Unknown page replacement algorithm.\n");
       return -1;
@@ -440,7 +559,39 @@ int main(int argc, char **argv) {
     return -1;
   }
 
+  if (!trace) {
+    FILE *fp = fopen("trace", "r");   
+    if(fp) {
+      fscanf(fp, "%llu", &num_access);
+      for (size_t i = 0; i < num_access; i++) {
+        fscanf(fp, "%u", &page_accesses[i]);
+      }
+
+      fclose(fp);
+    } else {
+      printf("trace-file missing\n");
+      return 1;
+    }
+  }
+
+  for (size_t i = 0; i < RAM_PAGES; i++) {
+    page_memory[i] = -1;
+  }
+
   run(argc, argv);
 
   printf("%llu page faults\n", num_pagefault);
+  printf("%llu disk writes\n", num_diskwrite);
+
+  if (trace) {
+    FILE *fp = fopen("trace", "w");   
+    if(fp) {
+      fprintf(fp, "%llu\n", num_access);
+      for (size_t i = 0; i < num_access; i++) {
+        fprintf(fp, "%u", page_accesses[i]);
+        if (i < num_access - 1) fprintf(fp, "\n");
+      }
+      fclose(fp);
+    }
+  }
 }
